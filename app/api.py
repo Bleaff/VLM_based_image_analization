@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse
 from .config import load_config, load_prompts
 from .ollama_client import OllamaClient
 from .pipeline import Pipeline
-
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 # load config & prompts at startup
 CFG = load_config(os.environ.get("APP_CONFIG_PATH", "./config/config.yml"))
 PROMPTS = load_prompts(CFG.prompts_file)
@@ -15,6 +16,7 @@ PIPE = Pipeline(CFG, PROMPTS, OLLAMA)
 
 app = FastAPI(title="Modular Qwen Pipeline")
 
+static_dir = Path(__file__).resolve().parent.parent / "frontend"
 @app.post("/analyze")
 async def analyze(
     image: UploadFile = File(None),
@@ -41,10 +43,15 @@ async def analyze(
             raise HTTPException(status_code=400, detail="image required for action=new")
         img_bytes = await image.read()
         res = await PIPE.ask_questions(img_bytes, image.filename, stream=stream_mode)
-        # include dialog_state minimal
-        response_state = {"stage":"asking", "image_description": res.get("image_description")}
+    
+        # ⚠️ Сохраняем и описание, и список вопросов в dialog_state
+        response_state = {
+            "stage": "asking",
+            "image_description": res.get("image_description"),
+            "questions": res.get("questions", []),
+        }
+    
         return JSONResponse({**res, "dialog_state": response_state})
-
     else:  # action == 'answer'
         if not answers:
             raise HTTPException(status_code=400, detail="answers required for action=answer")
@@ -52,8 +59,28 @@ async def analyze(
             answers_obj = json.loads(answers)
         except Exception:
             raise HTTPException(status_code=400, detail="answers must be valid JSON")
+    
         image_description = prev_state.get("image_description", "No image description available.")
-        res = await PIPE.finalize(image_description, answers_obj, stream=stream_mode)
-        # add state
-        response_state = {"stage":"final"}
+        questions = prev_state.get("questions", [])
+    
+        # Собираем пары {question, answer}
+        qa_pairs = []
+        for q in questions:
+            qid = q.get("id")
+            qtext = q.get("text")
+            if not qid or not qtext:
+                continue
+            answer_text = answers_obj.get(qid, "").strip()
+            qa_pairs.append({
+                "question": qtext,
+                "answer": answer_text,
+            })
+    
+        # Отправляем в pipeline не сырые answers_obj, а пары
+        res = await PIPE.finalize(image_description, qa_pairs, stream=stream_mode)
+    
+        response_state = {"stage": "final"}
         return JSONResponse({**res, "dialog_state": response_state})
+
+
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")

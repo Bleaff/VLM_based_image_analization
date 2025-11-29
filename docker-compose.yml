@@ -5,10 +5,13 @@ services:
     container_name: ollama
     volumes:
       - ollama-data:/root/.ollama
+      - ./ollama-entrypoint.sh:/usr/local/bin/ollama-entrypoint.sh:ro
     ports:
-      - "11434:11434"    # Ollama API port
+      - "11434:11434"
     restart: unless-stopped
-    # Для GPU:  запускать `--gpus all` локально.
+    entrypoint: ["/usr/local/bin/ollama-entrypoint.sh"]
+    gpus:
+      - device: "all"
   app:
     build:
       context: .

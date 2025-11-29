@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>VLM Dermatology Demo</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+    }
+
+    .app {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+
+    .chat {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      height: 400px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+
+    .msg {
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+
+    .msg.user {
+      text-align: right;
+    }
+
+    .msg.user .bubble {
+      background: #007bff;
+      color: white;
+      margin-left: auto;
+    }
+
+    .msg.assistant .bubble {
+      background: #e9ecef;
+      margin-right: auto;
+    }
+
+    .bubble {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 12px;
+      max-width: 80%;
+      word-wrap: break-word;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    input[type="file"] {
+      font-size: 13px;
+    }
+
+    button {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: none;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .questions {
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+
+    .questions h2 {
+      font-size: 14px;
+      margin-top: 0;
+    }
+
+    .q-item {
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .q-item label {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .q-item input {
+      width: 100%;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 13px;
+    }
+
+    .status {
+      font-size: 12px;
+      color: #555;
+    }
+
+  </style>
+</head>
+<body>
+<div class="app">
+  <h1>VLM Dermatology Demo (Qwen3-VL)</h1>
+  <div class="status" id="status">Готово</div>
+
+  <div class="chat" id="chat"></div>
+
+  <div class="controls">
+    <div class="row">
+      <input type="file" id="imageInput" accept="image/*" />
+      <button id="sendImageBtn">Отправить фото (начать диалог)</button>
+    </div>
+  </div>
+
+  <div class="questions" id="questionsBlock" style="display:none;">
+    <h2>Уточняющие вопросы</h2>
+    <div id="questionsContainer"></div>
+    <button id="sendAnswersBtn">Отправить ответы</button>
+  </div>
+</div>
+
+<script>
+  const chatEl = document.getElementById('chat');
+  const statusEl = document.getElementById('status');
+  const imageInput = document.getElementById('imageInput');
+  const sendImageBtn = document.getElementById('sendImageBtn');
+  const questionsBlock = document.getElementById('questionsBlock');
+  const questionsContainer = document.getElementById('questionsContainer');
+  const sendAnswersBtn = document.getElementById('sendAnswersBtn');
+
+  // backend URL (если фронт и бэк на одном origin, можно оставить просто /analyze)
+  const ANALYZE_URL = '/analyze';
+
+  // state
+  let dialogState = null;
+  let lastQuestions = [];
+
+  function addMessage(role, text) {
+    const msg = document.createElement('div');
+    msg.className = 'msg ' + role;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    msg.appendChild(bubble);
+    chatEl.appendChild(msg);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function setStatus(text) {
+    statusEl.textContent = text;
+  }
+
+  function renderQuestions(questions) {
+    questionsContainer.innerHTML = '';
+    lastQuestions = questions || [];
+
+    if (!questions || questions.length === 0) {
+      questionsBlock.style.display = 'none';
+      return;
+    }
+
+    questions.forEach(q => {
+      const wrap = document.createElement('div');
+      wrap.className = 'q-item';
+
+      const label = document.createElement('label');
+      label.textContent = q.text;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.dataset.qid = q.id;
+
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      questionsContainer.appendChild(wrap);
+    });
+
+    questionsBlock.style.display = 'block';
+  }
+
+  async function sendImage() {
+    const file = imageInput.files[0];
+    if (!file) {
+      alert('Выбери фото перед отправкой');
+      return;
+    }
+
+    sendImageBtn.disabled = true;
+    setStatus('Отправка изображения / запрос вопросов...');
+    addMessage('user', 'Отправил фото кожного высыпания.');
+
+    const formData = new FormData();
+    formData.append('action', 'new');
+    formData.append('stream', 'false');
+    formData.append('image', file);
+
+    try {
+      const res = await fetch(ANALYZE_URL, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error('HTTP ' + res.status + ': ' + text);
+      }
+      const data = await res.json();
+      console.log('new action response', data);
+      dialogState = data.dialog_state || null;
+
+      // выводим в чат "ассистента" текстовое описание / вопросы
+      if (data.image_description) {
+        addMessage('assistant', 'Описание изображения: ' + data.image_description);
+      }
+      if (data.questions && data.questions.length > 0) {
+        const qsText = data.questions.map(q => '- ' + q.text).join('\n');
+        addMessage('assistant', 'Уточняющие вопросы:\n' + qsText);
+      } else {
+        addMessage('assistant', 'Модель не вернула вопросов.');
+      }
+
+      renderQuestions(data.questions || []);
+      setStatus('Вопросы получены, жду ответы');
+    } catch (err) {
+      console.error(err);
+      setStatus('Ошибка: ' + err.message);
+      addMessage('assistant', 'Произошла ошибка при запросе: ' + err.message);
+    } finally {
+      sendImageBtn.disabled = false;
+    }
+  }
+
+  async function sendAnswers() {
+    if (!dialogState) {
+      alert('Сначала отправь фото и получи вопросы.');
+      return;
+    }
+
+    const inputs = questionsContainer.querySelectorAll('input[data-qid]');
+    if (inputs.length === 0) {
+      alert('Нет полей с вопросами.');
+      return;
+    }
+
+    const answersObj = {};
+    let userSummary = 'Ответы:\n';
+    inputs.forEach(input => {
+      const qid = input.dataset.qid;
+      const val = input.value.trim();
+      answersObj[qid] = val;
+      userSummary += `${qid}: ${val}\n`;
+    });
+
+    addMessage('user', userSummary.trim() || 'Ответы отправлены.');
+
+    sendAnswersBtn.disabled = true;
+    setStatus('Отправка ответов / запрос финального вывода...');
+
+    const formData = new FormData();
+    formData.append('action', 'answer');
+    formData.append('stream', 'false');
+    formData.append('answers', JSON.stringify(answersObj));
+    formData.append('dialog_state', JSON.stringify(dialogState || {}));
+
+    try {
+      const res = await fetch(ANALYZE_URL, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error('HTTP ' + res.status + ': ' + text);
+      }
+      const data = await res.json();
+      console.log('answer action response', data);
+
+      dialogState = data.dialog_state || null;
+
+      if (data.parsed) {
+        // если модель вернула JSON-структуру
+        const d = data.parsed;
+        let txt = '';
+        if (d.differential_diagnoses) {
+          txt += 'Возможные диагнозы:\n';
+          d.differential_diagnoses.forEach((dx, i) => {
+            txt += `${i + 1}. ${dx.name || '—'} (уверенность: ${dx.confidence || 'unknown'})\n`;
+            if (dx.notes) txt += `   ${dx.notes}\n`;
+          });
+        }
+        if (d.key_differences) {
+          txt += '\nКлючевые отличия:\n' + d.key_differences + '\n';
+        }
+        if (d.symptoms_to_clarify) {
+          txt += '\nЧто ещё уточнить:\n- ' + d.symptoms_to_clarify.join('\n- ') + '\n';
+        }
+        if (d.recommended_tests) {
+          txt += '\nРекомендованные общие обследования:\n- ' + d.recommended_tests.join('\n- ') + '\n';
+        }
+        addMessage('assistant', txt.trim());
+      } else if (data.final_text) {
+        // если модель вернула просто текст
+        addMessage('assistant', data.final_text);
+      } else {
+        addMessage('assistant', 'Модель вернула неожиданный формат ответа.');
+      }
+
+      setStatus('Диалог завершён (прототип). Помни: это не мед. консультация.');
+      questionsBlock.style.display = 'none';
+    } catch (err) {
+      console.error(err);
+      setStatus('Ошибка: ' + err.message);
+      addMessage('assistant', 'Ошибка при отправке ответов: ' + err.message);
+    } finally {
+      sendAnswersBtn.disabled = false;
+    }
+  }
+
+  sendImageBtn.addEventListener('click', sendImage);
+  sendAnswersBtn.addEventListener('click', sendAnswers);
+</script>
+</body>
+</html>
