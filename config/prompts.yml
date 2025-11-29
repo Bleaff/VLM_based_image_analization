@@ -1,0 +1,38 @@
+# config/prompts.yml
+system:
+  general:
+    role: "You are an assistant that helps triage skin eruptions from visual information."
+    disclaimer: "This is not medical advice; consult a healthcare professional."
+
+templates:
+  ask_questions:
+    # template for "new" action (image -> ask 2-3 clarifying questions)
+    # placeholders: {image_description}
+    system: "{system_role} {disclaimer}"
+    user: |
+      Step 1: Describe visually what you see in the image: objects, colors, distribution, pattern, texture.
+      Step 2: Based on the visual description, generate 2–3 concise clarifying questions a clinician would ask.
+      Output the clarifying questions as short lines (one per question).
+      Image description: {image_description}
+
+  final_diagnosis:
+    # template for "answer" action (user answered clarifying questions -> final structured JSON)
+    # placeholders: {image_description}, {answers}
+    system: "{system_role} {disclaimer}"
+    user: |
+      Image description: {image_description}
+      Answers: {answers}
+
+      Task: Provide 2–3 possible differential diagnoses (hypotheses). For each diagnosis include:
+        - name
+        - brief justification (from visual clues and answers)
+        - confidence (low/medium/high)
+
+      Also provide:
+        - key_differences: concise text explaining how to distinguish the diagnoses
+        - symptoms_to_clarify: list of additional symptoms to ask the patient
+        - recommended_tests: list of safe general diagnostic steps (e.g. basic labs, dermatologist consult)
+
+      IMPORTANT: Output the result as valid JSON with keys:
+        differential_diagnoses (array), key_differences (string), symptoms_to_clarify (array), recommended_tests (array).
+      Always include the disclaimer at top.

@@ -1,0 +1,29 @@
+version: "3.8"
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"    # Ollama API port
+    restart: unless-stopped
+    # Для GPU:  запускать `--gpus all` локально.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    volumes:
+      - ./config:/app/config:ro
+      - ./app:/app/app:ro
+    environment:
+      - APP_CONFIG_PATH=/app/config/config.yml
+      - APP_OLLAMA_URL=http://ollama:11434/api/generate
+    ...
+
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+volumes:
+  ollama-data:

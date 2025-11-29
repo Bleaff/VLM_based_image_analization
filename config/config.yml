@@ -1,0 +1,20 @@
+# config/config.yml
+ollama:
+  url: "http://ollama:11434/api/generate"   # can be overridden by env APP_OLLAMA_URL
+  default_model: "qwen3-vl:8b"
+  timeout_seconds: 120
+  # default behavior for calls
+  defaults:
+    stream: false
+    max_tokens: 512
+
+service:
+  listen_host: "0.0.0.0"
+  listen_port: 8081
+  allowed_actions: ["new", "answer"]
+
+logging:
+  level: "INFO"
+
+# prompt-related configuration file path (relative to repo root)
+prompts_file: "./config/prompts.yml"
