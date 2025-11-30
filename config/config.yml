@@ -2,7 +2,7 @@
 ollama:
   url: "http://ollama:11434/api/generate"   # can be overridden by env APP_OLLAMA_URL
   default_model: "qwen3-vl:8b"
-  timeout_seconds: 120
+  timeout_seconds: 300
   # default behavior for calls
   defaults:
     stream: false
